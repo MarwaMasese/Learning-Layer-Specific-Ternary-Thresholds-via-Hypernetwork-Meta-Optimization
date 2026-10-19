@@ -1,0 +1,16 @@
+{
+  "_status": "same training-quantizer settings as configs/cifar.json",
+  "fp_epochs": 0,
+  "epochs": 10,
+  "batch_size": 256,
+  "img_size": 224,
+  "train_mode": "hard_soft",
+  "temp_schedule": "exp",
+  "T0": 5.0,
+  "T_min": 0.05,
+  "lr_phi": 0.001,
+  "lambda1": 0.0001,
+  "lambda2": 0.001,
+  "k_inner": 5,
+  "deterministic": true
+}

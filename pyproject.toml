@@ -1,0 +1,19 @@
+[project]
+name = "experimentswacv"
+version = "1.0.0"
+description = "Learning layer-specific ternary thresholds via hypernetwork meta-optimization (WACV 2027 experiments)"
+requires-python = ">=3.10"
+
+[tool.black]
+# 79-character lines.
+line-length = 79
+target-version = ["py310"]
+
+[tool.isort]
+profile = "black"
+line_length = 79
+known_first_party = ["src"]
+
+[tool.mypy]
+python_version = "3.10"
+ignore_missing_imports = true

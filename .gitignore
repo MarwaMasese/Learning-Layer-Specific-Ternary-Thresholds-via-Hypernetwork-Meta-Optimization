@@ -1,0 +1,33 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+env/
+
+# Data & artifacts (downloadable / regenerable — never commit)
+data/
+checkpoints/
+*.pth
+*.pt
+
+# SLURM / cluster logs
+slurm-*.out
+*.err
+
+# OS / editor
+.DS_Store
+.ipynb_checkpoints/
+
+# Generated job files and queue logs
+jobs/
+logs/
+
+# Run outputs (lab layout) and logs
+runs/
+slurm_logs/
+queue_logs/
+
+# Paper sources (kept in a separate folder, never in this repo)
+wacv-2027-author-kit-template/

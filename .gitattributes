@@ -1,0 +1,5 @@
+# Shell scripts MUST use LF or they break on Linux/Narval (bad interpreter ^M).
+*.sh text eol=lf
+# Python is safe either way, but keep it consistent across machines.
+*.py text eol=lf
+*.slurm text eol=lf

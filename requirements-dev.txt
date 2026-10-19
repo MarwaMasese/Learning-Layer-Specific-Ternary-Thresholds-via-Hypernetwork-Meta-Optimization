@@ -1,0 +1,11 @@
+-r requirements.txt
+
+# Figures (scripts/plot_thresholds.py).
+matplotlib
+
+# Formatting and linting tools.
+black
+isort
+flake8
+mypy
+pre-commit

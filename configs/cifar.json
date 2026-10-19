@@ -1,0 +1,16 @@
+{
+  "_status": "train_mode / T_min / temp_schedule are set from the held-out accuracy of `make_jobs.py select`; to be frozen before the sweeps",
+  "fp_epochs": 15,
+  "epochs": 30,
+  "batch_size": 128,
+  "img_size": 224,
+  "train_mode": "hard_soft",
+  "temp_schedule": "exp",
+  "T0": 5.0,
+  "T_min": 0.05,
+  "lr_phi": 0.001,
+  "lambda1": 0.0001,
+  "lambda2": 0.001,
+  "k_inner": 5,
+  "deterministic": true
+}
