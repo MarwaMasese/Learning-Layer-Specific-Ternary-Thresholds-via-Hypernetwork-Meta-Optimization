@@ -145,11 +145,6 @@ tests/smoke_test.py        CPU checks (make test)
 docs/                      figures
 ```
 
-## Authors
-- Cornelius Maroa Masese (corneliusmarwa583@gmail.com)
-- Ali Hussein (alizawahry1@gmail.com)
-- Ashery Mbilinyi (ashery@uvic.ca)
-
 ## Citation
 ```bibtex
 @inproceedings{ternarythresholds2027,
