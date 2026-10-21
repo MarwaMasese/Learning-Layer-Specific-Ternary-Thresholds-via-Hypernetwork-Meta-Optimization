@@ -145,13 +145,4 @@ tests/smoke_test.py        CPU checks (make test)
 docs/                      figures
 ```
 
-## Citation
-```bibtex
-@inproceedings{ternarythresholds2027,
-  title     = {Learning Layer-Specific Ternary Thresholds via Hypernetwork Meta-Optimization},
-  author    = {Masese, Cornelius Maroa and Hussein, Ali and
-               Mbilinyi, Ashery},
-  booktitle = {Proceedings of the IEEE/CVF Winter Conference on Applications of Computer Vision (WACV)},
-  year      = {2027}
-}
 ```
