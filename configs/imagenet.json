@@ -1,5 +1,4 @@
 {
-  "_status": "same training-quantizer settings as configs/cifar.json",
   "fp_epochs": 0,
   "epochs": 10,
   "batch_size": 256,

@@ -65,15 +65,16 @@ swin_t` (timm ImageNet-1k weights; `vit_s16` uses DeiT-S weights).
 ## Setup
 Python ≥ 3.10.
 ```bash
-git clone https://github.com/MarwaMasese/experimentswacv.git
-cd experimentswacv
+# After extracting the source archive, enter its directory.
+cd <source-directory>
 python -m venv ~/envs/ternary && source ~/envs/ternary/bin/activate
 pip install -r requirements.txt   # Alliance: pip install --no-index torch torchvision numpy timm
 python scripts/prefetch.py        # CIFAR-10/100 + all weights, then an offline check
 make test                         # CPU smoke tests, about 1-2 min: ALL PASSED
 ```
 The exact package versions used by each run are recorded in
-`runs/<name>/env.txt`.
+`runs/<name>/env.txt`. Run outputs, downloaded data, and checkpoints are not
+included in the source archive; they are created locally when you run the code.
 
 ## Running one experiment
 ```bash

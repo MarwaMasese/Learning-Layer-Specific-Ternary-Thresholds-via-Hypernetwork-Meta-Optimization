@@ -1,5 +1,4 @@
 {
-  "_status": "train_mode / T_min / temp_schedule are set from the held-out accuracy of `make_jobs.py select`; to be frozen before the sweeps",
   "fp_epochs": 15,
   "epochs": 30,
   "batch_size": 128,
