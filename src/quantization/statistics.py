@@ -2,7 +2,9 @@
 Per-layer statistics s^(l) = [μ, σ, γ, ρ]  (paper Sec. 3.1)
 ==========================================================
     μ  mean of the layer's input activations
-    σ  std  of the layer's input activations
+    σ  std  of the layer's input activations (the paper's "variance";
+       Tab. 4 labels its ablation "weight variance", but the statistic
+       ablated by `--stats mu,gamma,rho` is this activation std)
     γ  mean |∂L/∂W| of the layer's weights
     ρ  activation sparsity: fraction of |input| < 0.01
 

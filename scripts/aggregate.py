@@ -3,7 +3,8 @@
     python scripts/aggregate.py                 # TEST accuracy, markdown
     python scripts/aggregate.py --heldout       # HELD-OUT accuracy: use this,
                                                 # never test, to choose configs
-    python scripts/aggregate.py --latex tables  # also write LaTeX table rows
+    python scripts/aggregate.py --latex tables  # also write LaTeX tables,
+                                                # incl. paper_table{1..5}
 
 Every number in the paper's tables must come from this script. Runs are
 grouped by (dataset, model, method + tag); the seed count n is always shown,
@@ -23,7 +24,7 @@ import os
 from collections import defaultdict
 
 import numpy as np
-from latex_tables import write_latex
+from latex_tables import write_latex, write_paper_tables
 
 METHOD_ORDER = [
     "fp",
@@ -142,6 +143,11 @@ def main() -> None:
     ap.add_argument("--runs", default="runs")
     ap.add_argument("--latex", default=None, help="directory for .tex rows")
     ap.add_argument(
+        "--paper_std",
+        action="store_true",
+        help="paper tables: show mean ± std instead of the mean only",
+    )
+    ap.add_argument(
         "--heldout",
         action="store_true",
         help="report held-out instead of test accuracy",
@@ -212,6 +218,10 @@ def main() -> None:
             write_latex(
                 a.latex, ds, models, groups, metric, stat, paired, fmt, PRETTY
             )
+
+    if a.latex and not a.heldout:
+        # camera-ready layout: paper_table{1..5}_*.tex (test accuracy)
+        write_paper_tables(a.latex, groups, stat, paired, std=a.paper_std)
 
 
 if __name__ == "__main__":

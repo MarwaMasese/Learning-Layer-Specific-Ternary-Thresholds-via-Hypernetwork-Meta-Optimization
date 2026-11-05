@@ -303,6 +303,51 @@ def test_phi_gradient():
     )
 
 
+def test_paper_tables():
+    """MAC count matches paper Tab. 3; paper-layout tables are written."""
+    print("paper tables")
+    from src.models.backbones import count_macs
+
+    macs = count_macs(build_model("resnet18", 1000, 224, pretrained=False))
+    check(
+        abs(macs / 1e9 - 1.8) < 0.05,
+        f"resnet18 MACs {macs / 1e9:.2f}G ≈ 1.8G (paper Tab. 3)",
+    )
+
+    sys.path.insert(0, os.path.join(ROOT, "scripts"))
+    from aggregate import paired, stat
+    from latex_tables import write_paper_tables
+
+    def run(ds, model, acc, seed=0):
+        return {
+            "config": {"seed": seed},
+            "test_acc": acc,
+            "params": 11_700_000,
+            "method_params": 4610,
+            "macs": macs,
+            "peak_mem_mb": 1000.0,
+            "mean_epoch_time_s": 10.0,
+        }
+
+    groups = {}
+    for ds in ("cifar10", "imagenet"):
+        for v, acc in (("fp", 95.0), ("lsq", 90.0), ("ours", 92.0)):
+            groups[(ds, "resnet18", v)] = [run(ds, "resnet18", acc)]
+        groups[(ds, "resnet18", "fixed")] = [run(ds, "resnet18", 89.0)]
+    groups[("cifar10", "resnet18", "ours_k1")] = [run("", "", 91.0)]
+    tmp = tempfile.mkdtemp()
+    try:
+        names = write_paper_tables(tmp, groups, stat, paired)
+        check(
+            len(names) == 5,
+            f"all five paper tables written ({len(names)})",
+        )
+        t1 = open(os.path.join(tmp, "paper_table1_resnet18.tex")).read()
+        check("+2.0" in t1 and "W2/A2" in t1, "Tab. 1 has vs. LSQ and W/A")
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
 def test_end_to_end(models):
     """Every method trains on random smoke-test data and writes a complete
     run dir."""
@@ -469,6 +514,7 @@ if __name__ == "__main__":
     for name in (BACKBONES if a.all else ["resnet18", "mobilenetv2"]):
         test_backbone(name)
     test_phi_gradient()
+    test_paper_tables()
     test_end_to_end(["resnet18", "vit_s16"] if a.all else ["resnet18"])
     print(
         f"\n{'ALL PASSED' if not check.failed else f'{check.failed} FAILED'}"

@@ -38,7 +38,7 @@ import torch.nn as nn
 def soft_ternary(
     w_n: torch.Tensor, tau_plus, tau_minus, T: float
 ) -> torch.Tensor:
-    """Q_soft (paper Eq. 9): σ((w-τ-)/T) + σ((w-τ+)/T) - 1.
+    """Q_soft (paper Eq. 4): σ((w-τ-)/T) + σ((w-τ+)/T) - 1.
 
     → +1 for w ≫ τ+, 0 for τ- ≪ w ≪ τ+, -1 for w ≪ τ-, and recovers
     `hard_ternary` as T → 0. Differentiable in w and in both thresholds.
@@ -51,7 +51,7 @@ def soft_ternary(
 
 
 def hard_ternary(w_n: torch.Tensor, tau_plus, tau_minus) -> torch.Tensor:
-    """Q_hard (Eq. 8): +1 if w > τ+, -1 if w < τ-, else 0. No gradient."""
+    """Q_hard: +1 if w > τ+, -1 if w < τ-, else 0 (Q_soft as T → 0)."""
     return (w_n > tau_plus).to(w_n.dtype) - (w_n < tau_minus).to(w_n.dtype)
 
 
@@ -123,7 +123,9 @@ class QuantState:
     def update_temperature(self, epoch: int, total_epochs: int) -> float:
         """T(p) for training progress p ∈ [0, 1], floored at T_min.
 
-        exp:    T0 · exp(-5p)           (paper default; floor 0.0067·T0)
+        exp:    T0 · exp(-5p)           (paper Sec. 3.3 default; with
+                                         T0 = 5 the T_min = 0.05 floor is
+                                         reached at p = ln(100)/5 ≈ 0.92)
         geom:   T0 · (T_min / T0)^p     (geometric, reaches T_min at the end)
         linear: T0 + (T_min - T0) · p   (ablation)
         const:  T_min throughout        ("no annealing" ablation)

@@ -21,6 +21,16 @@ step, as in first-order DARTS / MAML); the K inner steps use K distinct
 batches. Every reported accuracy comes from ``evaluate(..., mode="hard")``:
 exact ternary weights {-alpha_l, 0, +alpha_l}.
 
+Relation to the paper (Sec. 3.2-3.3): the outer loss L_val(theta*(phi)) is
+evaluated at the *current* theta, and its gradient reaches phi only through
+the thresholds of the soft quantizer on that single held-out forward pass.
+Nothing is back-propagated through the K inner updates, so extra memory does
+not grow with K (it is O(|theta|), not O(K |theta|)), and the outer-step cost
+per epoch scales with 1/K: a larger K means fewer outer steps and less
+overhead. With ``--train_mode ste`` the thresholds are detached, so phi then
+receives gradient only from the two regularizers (no task-loss signal).
+See docs/paper_alignment.md.
+
 Run-directory artefacts written here (see run.py for the full layout):
 ``logs/metrics.jsonl``, ``checkpoints/last.pt`` and ``checkpoints/best.pt``.
 """

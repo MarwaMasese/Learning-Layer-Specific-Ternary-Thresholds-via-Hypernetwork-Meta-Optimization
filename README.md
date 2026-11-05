@@ -1,6 +1,8 @@
 # Learning Layer-Specific Ternary Thresholds via Hypernetwork Meta-Optimization
 
-Official code for the WACV 2027 paper. A compact hypernetwork, shared across
+Official code for the WACV 2027 paper *Learning Layer-Specific Ternary
+Thresholds via Hypernetwork Meta-Optimization* (Cornelius Maroa Masese,
+Ali Hussein, Ashery Mbilinyi). A compact hypernetwork, shared across
 all layers, reads each layer's activation and gradient statistics and outputs
 that layer's asymmetric ternary thresholds. It is trained by first-order
 bilevel optimization through a temperature-annealed soft quantizer. Every
@@ -33,16 +35,22 @@ layer's own statistics.
 - **Statistics** `[μ, σ, γ, ρ]` (`src/quantization/statistics.py`):
   input-activation mean/std/sparsity and weight-gradient magnitude,
   EMA-smoothed, fed as `[μ, log σ, log γ, ρ]` standardized across layers.
+  σ is the *activation* std (the ablation the paper's Tab. 4 calls "weight
+  variance" removes this feature).
 - **Hypernetwork** (`src/quantization/hypernetwork.py`): shared
   4→64→64→2 MLP (4,610 parameters), sigmoid-parameterized thresholds.
 - **Bilevel training** (`src/training/loop.py`): θ is trained on the train
   split; every K = 5 inner steps, φ takes one step on a held-out batch (10% of
   the CIFAR train set, or 10 images per class for ImageNet), using a
-  first-order meta-gradient.
-- **Soft quantizer** (`src/quantization/quantizers.py`): Eq. 9 of the paper,
-  with an annealed temperature. With `--train_mode hard_soft` the forward
-  pass uses exact ternary weights and Q_soft only supplies the gradients.
-  **Every reported accuracy uses exact hard ternary weights.**
+  first-order meta-gradient: θ is held fixed and nothing is unrolled through
+  the K inner steps, so memory does not grow with K and a larger K means
+  fewer (cheaper) outer steps.
+- **Soft quantizer** (`src/quantization/quantizers.py`): Eq. 4 of the paper,
+  with T(p) = 5·exp(−5p) floored at 0.05. With `--train_mode hard_soft` the forward
+  pass uses exact ternary weights and Q_soft only supplies the gradients;
+  this is the setting in `configs/*.json` (chosen on held-out accuracy by
+  `make_jobs.py select`), while the CLI default without `--config` is plain
+  `soft`. **Every reported accuracy uses exact hard ternary weights.**
 
 <p align="center">
   <img src="docs/figures/soft_quantizer.png" width="480"
@@ -114,16 +122,42 @@ python scripts/gpu_queue.py jobs/main.txt --gpus 0,1
 Resubmitting a jobs file skips finished runs and resumes unfinished ones.
 
 ## Reproducing the paper
-| paper item | command (after the FP wave) |
-|---|---|
-| Training-quantizer selection (held-out) | `make_jobs.py select` |
-| CIFAR-10/100 tables (6 backbones, 3 seeds) | `make_jobs.py main --config configs/cifar.json` |
-| ImageNet table | `make_jobs.py imagenet --config configs/imagenet.json` |
-| Ablation and sensitivity table | `make_jobs.py ablation --config configs/cifar.json` |
-| All tables as LaTeX | `python scripts/aggregate.py --latex tables` |
+Run the FP wave of each jobs file first (the generated files do this, with a
+`---` barrier), then:
 
-Every setting (training quantizer, the fixed baseline's τ) is chosen on
-held-out accuracy (`aggregate.py --heldout`), never on test accuracy.
+| paper item | jobs | output of `aggregate.py --latex tables` |
+|---|---|---|
+| Training-quantizer selection (held-out, not in the paper) | `make_jobs.py select` | read with `aggregate.py --heldout` |
+| Tab. 1, CIFAR-10/100 columns (ResNet-18, 3 seeds) | `make_jobs.py main --models resnet18 --config configs/cifar.json` | `paper_table1_resnet18.tex` |
+| Tab. 1 ImageNet column, Tab. 2 (6 backbones, 1 seed) | `make_jobs.py imagenet --config configs/imagenet.json` | `paper_table1_resnet18.tex`, `paper_table2_imagenet.tex` |
+| Tab. 3 (params, FLOPs, HN overhead, memory) | same ImageNet runs (`ours` vs `fixed`) | `paper_table3_efficiency.tex` |
+| Tab. 4 ablations, Tab. 5 sensitivity (CIFAR-10, ResNet-18) | `make_jobs.py ablation --config configs/cifar.json` | `paper_table4_ablation.tex`, `paper_table5_sensitivity.tex` |
+| Extra: CIFAR on all six backbones, `fixed`/`perlayer` baselines | `make_jobs.py main --config configs/cifar.json` | `<dataset>_main.tex` |
+
+```bash
+python scripts/aggregate.py --latex tables              # paper layout, mean
+python scripts/aggregate.py --latex tables --paper_std  # mean ± std
+```
+
+Test accuracy is always that of the final-epoch model. The held-out split
+drives the outer loop and is used to choose settings (training quantizer,
+the fixed baseline's τ via `aggregate.py --heldout`); test accuracy is never
+used for any choice. See [`docs/paper_alignment.md`](docs/paper_alignment.md)
+for a line-by-line comparison of the paper and this code, including known
+differences.
+
+## Citation
+```bibtex
+@inproceedings{masese2027ternary,
+  title     = {Learning Layer-Specific Ternary Thresholds via Hypernetwork
+               Meta-Optimization},
+  author    = {Masese, Cornelius Maroa and Hussein, Ali and
+               Mbilinyi, Ashery},
+  booktitle = {Proceedings of the IEEE/CVF Winter Conference on
+               Applications of Computer Vision (WACV)},
+  year      = {2027}
+}
+```
 
 ## Development
 ```bash
@@ -143,7 +177,7 @@ src/training/              training loops, methods
 src/utils/data.py          CIFAR / ImageNet loaders, held-out split
 scripts/                   job generation, SLURM, queue, aggregation, prefetch
 tests/smoke_test.py        CPU checks (make test)
-docs/                      figures
+docs/                      figures, paper ↔ code alignment notes
 ```
 
 ```
