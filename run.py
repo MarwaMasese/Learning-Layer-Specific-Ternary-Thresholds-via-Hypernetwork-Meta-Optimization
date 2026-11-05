@@ -9,8 +9,8 @@ Every run writes one self-contained directory::
         env.txt               Python/torch/CUDA, GPU, git commit, SLURM ids
         results.json          final metrics (what scripts/aggregate.py reads)
         logs/metrics.jsonl    one JSON line per epoch
-        checkpoints/last.pt   resumable state (resumed automatically)
-        checkpoints/best.pt   weights with the best held-out accuracy
+        checkpoints/last.pt   resumable state and final weights (resumed
+                              automatically)
 
 Examples::
 
@@ -56,6 +56,7 @@ except (AttributeError, ValueError):
 from src.models.backbones import (  # noqa: E402
     BACKBONES,
     build_model,
+    count_macs,
     count_params,
     default_optimizer,
     layer_weight_profile,
@@ -219,7 +220,9 @@ def build_parser() -> argparse.ArgumentParser:
         dest="train_mode",
         default="soft",
         choices=("soft", "ste", "hard_soft"),
-        help="training quantizer for ours/fixed/perlayer",
+        help="training quantizer for ours/fixed/perlayer: soft = Q_soft "
+        "(Eq. 3); ste = STE ablation (Tab. 4); hard_soft = hard forward, "
+        "Q_soft backward",
     )
 
     g = p.add_argument_group("soft quantizer")
@@ -231,7 +234,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--temp-schedule",
         dest="temp_schedule",
         default="exp",
-        choices=("exp", "geom", "linear", "const"),
+        choices=("exp", "linear", "const"),
     )
 
     g = p.add_argument_group("baselines")
@@ -372,6 +375,15 @@ def resolve_init(args: argparse.Namespace) -> Path:
     return Path(args.out_dir) / fp_name / "checkpoints" / "last.pt"
 
 
+def _macs(model, img_size: int) -> int | None:
+    """MACs per image (paper Tab. 3 "FLOPs"); None if counting fails."""
+    try:
+        return count_macs(model, img_size)
+    except Exception as e:  # never fail a training run over a statistic
+        print(f"warning: MAC count failed ({e})")
+        return None
+
+
 def main(argv: list[str] | None = None) -> int:
     """Run one experiment; returns a process exit code."""
     argv = sys.argv[1:] if argv is None else argv
@@ -420,6 +432,7 @@ def main(argv: list[str] | None = None) -> int:
     t0 = time.time()
 
     if args.method == "fp":
+        result["macs"] = _macs(model, args.img_size)
         model.to(device)
         res = train_fp(model, loaders, args, device, run_dir=run_dir)
         result.update(
@@ -437,6 +450,7 @@ def main(argv: list[str] | None = None) -> int:
             return 2
         state = torch.load(init, map_location="cpu")
         model.load_state_dict(state.get("model", state))
+        result["macs"] = _macs(model, args.img_size)
         layers = ternarize(model)
         profile = layer_weight_profile(model)
         model.to(device)

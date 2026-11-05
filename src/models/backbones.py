@@ -139,6 +139,26 @@ def layer_weight_profile(model: nn.Module) -> List[dict]:
     return out
 
 
+@torch.no_grad()
+def count_macs(model: nn.Module, img_size: int = 224) -> int:
+    """Multiply-accumulates of one forward pass on a 1×3×H×W input.
+
+    This is the quantity reported as "FLOPs" in the paper's Tab. 3 (e.g.
+    ResNet-18 1.8G), i.e. half of torch's FLOP count. Counted on the model
+    as given (ternary layers count like their FP counterparts).
+    """
+    from torch.utils.flop_counter import FlopCounterMode
+
+    p = next(model.parameters())
+    was_training = model.training
+    model.eval()
+    x = torch.zeros(1, 3, img_size, img_size, device=p.device, dtype=p.dtype)
+    with FlopCounterMode(display=False) as fc:
+        model(x)
+    model.train(was_training)
+    return fc.get_total_flops() // 2
+
+
 def count_params(model: nn.Module) -> Tuple[int, int]:
     """(total params, params inside ternary layers' weights)."""
     total = sum(p.numel() for p in model.parameters())

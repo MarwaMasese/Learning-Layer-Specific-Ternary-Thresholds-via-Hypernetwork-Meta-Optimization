@@ -1,25 +1,23 @@
 """
-Generate job files for scripts/gpu_queue.py.
+Generate job files for scripts/gpu_queue.py, one per experiment group of the
+paper:
 
-    python scripts/make_jobs.py select --data_dir '$DATA'
-    python scripts/make_jobs.py main --data_dir '$DATA'
-        --config configs/cifar.json
-    python scripts/make_jobs.py ablation --data_dir '$DATA'
-        --config configs/cifar.json
-    python scripts/make_jobs.py imagenet --data_dir '$DATA'
-        --config configs/imagenet.json
+    python scripts/make_jobs.py main --data_dir '$DATA' \
+        --config configs/cifar.json          # Tab. 1, CIFAR-10/100 columns
+    python scripts/make_jobs.py imagenet --data_dir '$DATA' \
+        --config configs/imagenet.json    # Tab. 1 ImageNet column, Tabs. 2-3
+    python scripts/make_jobs.py ablation --data_dir '$DATA' \
+        --config configs/cifar.json          # Tabs. 4-5
 
-`select` chooses the training-quantizer setting (TRAIN_SETTINGS) before the
-sweeps: ours and the fixed baseline under each candidate setting, CIFAR-10,
-ResNet-18 and ViT-S/16, seed 0. The setting with the best HELD-OUT accuracy
-of ours is then written into configs/*.json.
+    main      ResNet-18 on CIFAR-10/100, 3 seeds, the methods of Tab. 1
+    imagenet  all six backbones on ImageNet, 1 seed, the methods of Tab. 2,
+              plus `fixed` (same quantizer, no hypernetwork) as the reference
+              for the Tab. 3 memory / time overhead
+    ablation  CIFAR-10 / ResNet-18, 3 seeds, every row of Tabs. 4 and 5
 
 Writes jobs/<phase>.txt. FP fine-tunes come first, then a `---` barrier, then
-the ternary runs that start from them.
-
-Protocol rule: any choice made from these runs (e.g. the fixed baseline's τ,
-learning rates) is made on HELD-OUT accuracy (`heldout_acc_hard` in the
-history), never on test accuracy.
+the ternary runs that start from them. All settings are fixed in advance
+(configs/*.json, paper Sec. 4.1); nothing is tuned on held-out or test data.
 """
 
 import argparse
@@ -33,45 +31,36 @@ ALL_MODELS = [
     "vit_s16",
     "swin_t",
 ]
+# Tabs. 1 and 2: the evaluated baselines (Sec. 4) and ours
 MAIN_METHODS = [
-    "ours",
-    "fixed",
-    "perlayer",
     "twn",
     "ttq",
-    "lsq",
     "rtn",
-    "fatnn",
     "metaquant",
+    "lsq",
+    "fatnn",
+    "ours",
 ]
-# ImageNet (Table 2): every baseline except per-layer, one seed
-IMAGENET_METHODS = [m for m in MAIN_METHODS if m != "perlayer"]
-FIXED_TAU_GRID = ("0.3", "0.7")  # plus the default 0.5 (`fixed`)
-
-# candidate training-quantizer settings compared by the `select` phase
-TRAIN_SETTINGS = {
-    "_soft_geom005": "--temp-schedule geom --T-min 0.005",
-    "_hs_005": "--train-mode hard_soft --T-min 0.05",
-    "_hs_03": "--train-mode hard_soft --T-min 0.3",
-}
+# Tab. 3 compares ours with the same pipeline without the hypernetwork
+IMAGENET_METHODS = MAIN_METHODS + ["fixed"]
 
 ABLATIONS = {
-    # statistic conditioning (features masked at the hypernetwork input)
+    # Tab. 4 -- statistic conditioning (features masked at the HN input)
     "_no_gamma": "--stats mu,sigma,rho",
     "_no_rho": "--stats mu,sigma,gamma",
     "_no_sigma": "--stats mu,gamma,rho",
     "_mean_only": "--stats mu",
-    # hypernetwork capacity
+    # Tab. 4 -- hypernetwork capacity
     "_w32": "--hn-width 32",
     "_w128": "--hn-width 128",
     "_d1": "--hn-depth 1",
     "_d3": "--hn-depth 3",
-    # quantizer design
+    # Tab. 4 -- quantization design
     "_symmetric": "--symmetric",
     "_linear_T": "--temp-schedule linear",
     "_const_T": "--temp-schedule const",
     "_ste": "--train-mode ste",
-    # sensitivity
+    # Tab. 5 -- sensitivity (each swept with the others at their defaults)
     "_l1_1e-5": "--lambda1 1e-5",
     "_l1_1e-3": "--lambda1 1e-3",
     "_l2_1e-4": "--lambda2 1e-4",
@@ -98,7 +87,7 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument(
         "phase",
-        choices=["select", "main", "ablation", "imagenet"],
+        choices=["main", "ablation", "imagenet"],
     )
     ap.add_argument(
         "--data_dir", "--data-root", dest="data_dir", required=True
@@ -107,7 +96,7 @@ def main():
     ap.add_argument(
         "--config",
         default=None,
-        help="JSON config for every run (required: main/ablation/imagenet)",
+        help="JSON config for every run (required)",
     )
     ap.add_argument("--seeds", default="0,1,2")
     ap.add_argument("--models", default=None, help="override model list")
@@ -116,7 +105,7 @@ def main():
     a = ap.parse_args()
 
     seeds = [int(s) for s in a.seeds.split(",")]
-    if a.phase in ("main", "ablation", "imagenet") and not a.config:
+    if not a.config:
         ap.error(
             f"{a.phase} needs --config (the frozen settings used in the paper)"
         )
@@ -126,46 +115,15 @@ def main():
     common = f"{common} {a.extra}".strip()
     fp, tern = [], []
 
-    if a.phase == "select":
-        models = a.models.split(",") if a.models else ["resnet18", "vit_s16"]
-        for m in models:
-            fp.append(cmd("cifar10", m, "fp", seeds[0], common))
-            for tag, flags in TRAIN_SETTINGS.items():
-                for meth in ("ours", "fixed"):
-                    tern.append(
-                        cmd(
-                            "cifar10",
-                            m,
-                            meth,
-                            seeds[0],
-                            common,
-                            tag=tag,
-                            extra=flags,
-                        )
-                    )
-
-    elif a.phase == "main":
-        models = a.models.split(",") if a.models else ALL_MODELS
+    if a.phase == "main":
+        # the paper's CIFAR results (Tab. 1) are ResNet-18 only
+        models = a.models.split(",") if a.models else ["resnet18"]
         for ds in a.datasets.split(","):
             for m in models:
                 for s in seeds:
                     fp.append(cmd(ds, m, "fp", s, common))
                     for meth in MAIN_METHODS:
                         tern.append(cmd(ds, m, meth, s, common))
-                    # fixed-tau grid: aggregate.py reports the tau with the
-                    # best HELD-OUT accuracy as "fixed (tuned)"
-                    for t in FIXED_TAU_GRID:
-                        tern.append(
-                            cmd(
-                                ds,
-                                m,
-                                "fixed",
-                                s,
-                                common,
-                                tag=f"_tau{t}",
-                                extra=f"--fixed_tau {t}",
-                            )
-                        )
 
     elif a.phase == "ablation":
         models = a.models.split(",") if a.models else ["resnet18"]
@@ -195,18 +153,6 @@ def main():
             fp.append(cmd("imagenet", m, "fp", seeds[0], common))
             for meth in IMAGENET_METHODS:
                 tern.append(cmd("imagenet", m, meth, seeds[0], common))
-            for t in FIXED_TAU_GRID:
-                tern.append(
-                    cmd(
-                        "imagenet",
-                        m,
-                        "fixed",
-                        seeds[0],
-                        common,
-                        tag=f"_tau{t}",
-                        extra=f"--fixed_tau {t}",
-                    )
-                )
 
     os.makedirs("jobs", exist_ok=True)
     path = os.path.join("jobs", f"{a.phase}.txt")
