@@ -1,18 +1,16 @@
 """Aggregate run directories into summary tables (mean +- std over seeds).
 
     python scripts/aggregate.py                 # TEST accuracy, markdown
-    python scripts/aggregate.py --heldout       # HELD-OUT accuracy: use this,
-                                                # never test, to choose configs
-    python scripts/aggregate.py --latex tables  # also write LaTeX tables,
-                                                # incl. paper_table{1..5}
+    python scripts/aggregate.py --latex tables  # also write the paper's
+                                                # Tabs. 1-5 (paper_table*.tex)
+    python scripts/aggregate.py --heldout       # HELD-OUT accuracy, for
+                                                # monitoring only
 
-Every number in the paper's tables must come from this script. Runs are
-grouped by (dataset, model, method + tag); the seed count n is always shown,
-so incomplete groups are visible.
-
-"fixed (tuned)" is the fixed baseline at the tau in {0.3, 0.5, 0.7} with the
-best mean HELD-OUT accuracy for that (dataset, model); its test accuracy is
-then reported, exactly as for every other method.
+Every number in the paper's tables comes from this script. Runs are grouped
+by (dataset, model, method + tag); the seed count n is always shown, so
+incomplete groups are visible. Reported accuracy is the final-epoch model's
+test accuracy with exact ternary weights; held-out accuracy is never used to
+choose anything (paper Sec. 4.1).
 """
 
 from __future__ import annotations
@@ -24,7 +22,7 @@ import os
 from collections import defaultdict
 
 import numpy as np
-from latex_tables import write_latex, write_paper_tables
+from latex_tables import write_paper_tables
 
 METHOD_ORDER = [
     "fp",
@@ -34,7 +32,6 @@ METHOD_ORDER = [
     "rtn",
     "fatnn",
     "metaquant",
-    "fixed_tuned",
     "fixed",
     "perlayer",
     "ours_joint",
@@ -48,21 +45,6 @@ MODEL_ORDER = [
     "vit_s16",
     "swin_t",
 ]
-PRETTY = {
-    "fp": "Full precision",
-    "twn": "TWN",
-    "ttq": "TTQ",
-    "lsq": "LSQ (ternary)",
-    "rtn": "RTN",
-    "fatnn": "FATNN",
-    "metaquant": "MetaQuant",
-    "fixed_tuned": "Fixed threshold (tuned)",
-    "fixed": "Fixed threshold",
-    "perlayer": "Per-layer $\\tau$",
-    "ours_joint": "Ours (single-level)",
-    "ours": "Ours",
-}
-FIXED_VARIANTS = {"fixed": 0.5, "fixed_tau0.3": 0.3, "fixed_tau0.7": 0.7}
 
 
 def load(runs_dir: str) -> dict:
@@ -92,21 +74,6 @@ def stat(runs: list, metric: str):
     if len(v) == 0:
         return None
     return v.mean(), (v.std(ddof=1) if len(v) > 1 else 0.0), len(v)
-
-
-def add_tuned_fixed(groups: dict) -> dict:
-    """Pick, per (dataset, model), the fixed tau with best held-out mean."""
-    chosen = {}
-    for ds, model in {k[:2] for k in groups}:
-        best = None
-        for variant, tau in FIXED_VARIANTS.items():
-            s = stat(groups.get((ds, model, variant), []), "heldout")
-            if s is not None and (best is None or s[0] > best[0]):
-                best = (s[0], variant, tau)
-        if best is not None:
-            groups[(ds, model, "fixed_tuned")] = groups[(ds, model, best[1])]
-            chosen[(ds, model)] = best[2]
-    return chosen
 
 
 def fmt(s, latex=False) -> str:
@@ -158,14 +125,13 @@ def main() -> None:
     if not groups:
         print("no results found")
         return
-    chosen_tau = add_tuned_fixed(groups)
 
     for ds in sorted({k[0] for k in groups}):
         models = [
             m for m in MODEL_ORDER if any(k[:2] == (ds, m) for k in groups)
         ]
         variants = sorted({k[2] for k in groups if k[0] == ds}, key=order_key)
-        what = "HELD-OUT (use for selection)" if a.heldout else "TEST"
+        what = "HELD-OUT (monitoring only)" if a.heldout else "TEST"
         print(
             f"\n## {ds}  ({what} top-1 %, hard ternary; "
             "mean ± std over seeds)\n"
@@ -177,18 +143,12 @@ def main() -> None:
                 fmt(stat(groups.get((ds, m, v), []), metric)) for m in models
             ]
             print(f"| {v} | " + " | ".join(cells) + " |")
-        for base in ("fixed_tuned", "lsq", "twn"):
+        for base in ("lsq", "twn"):
             cells = [
                 fmt(paired(groups, ds, m, "ours", base, metric))
                 for m in models
             ]
             print(f"| ours − {base} (paired) | " + " | ".join(cells) + " |")
-        taus = [str(chosen_tau.get((ds, m), "--")) for m in models]
-        print(
-            "| fixed (tuned): tau chosen on held-out | "
-            + " | ".join(taus)
-            + " |"
-        )
 
         print(
             "\n| model | ternary layers | params | method params | "
@@ -214,13 +174,8 @@ def main() -> None:
                 f"{mean(o, 'peak_mem_mb'):.0f} |"
             )
 
-        if a.latex and not a.heldout:
-            write_latex(
-                a.latex, ds, models, groups, metric, stat, paired, fmt, PRETTY
-            )
-
     if a.latex and not a.heldout:
-        # camera-ready layout: paper_table{1..5}_*.tex (test accuracy)
+        # paper_table{1..5}_*.tex, camera-ready layout (test accuracy)
         write_paper_tables(a.latex, groups, stat, paired, std=a.paper_std)
 
 

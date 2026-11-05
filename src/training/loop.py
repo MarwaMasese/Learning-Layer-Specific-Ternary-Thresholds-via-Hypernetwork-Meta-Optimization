@@ -21,18 +21,19 @@ step, as in first-order DARTS / MAML); the K inner steps use K distinct
 batches. Every reported accuracy comes from ``evaluate(..., mode="hard")``:
 exact ternary weights {-alpha_l, 0, +alpha_l}.
 
-Relation to the paper (Sec. 3.2-3.3): the outer loss L_val(theta*(phi)) is
-evaluated at the *current* theta, and its gradient reaches phi only through
-the thresholds of the soft quantizer on that single held-out forward pass.
-Nothing is back-propagated through the K inner updates, so extra memory does
-not grow with K (it is O(|theta|), not O(K |theta|)), and the outer-step cost
-per epoch scales with 1/K: a larger K means fewer outer steps and less
-overhead. With ``--train_mode ste`` the thresholds are detached, so phi then
-receives gradient only from the two regularizers (no task-loss signal).
-See docs/paper_alignment.md.
+This is the first-order approximation of Sec. 2.4 / 3.3 (second-order
+terms of the bilevel meta-gradient are omitted, as in first-order MAML):
+L_val is evaluated at the theta reached after the K inner steps, and its
+gradient reaches phi through the thresholds of the quantizer (Q_soft, or the
+STE for the Tab. 4 ablation). See docs/paper_alignment.md.
+
+The held-out split is used only by the outer loop and for per-epoch
+monitoring (paper Sec. 3.2, 4.1): no checkpoint is selected on it, and the
+outer forward pass leaves BatchNorm running statistics untouched, so no
+held-out information reaches theta.
 
 Run-directory artefacts written here (see run.py for the full layout):
-``logs/metrics.jsonl``, ``checkpoints/last.pt`` and ``checkpoints/best.pt``.
+``logs/metrics.jsonl`` and ``checkpoints/last.pt``.
 """
 
 from __future__ import annotations
@@ -41,7 +42,7 @@ import json
 import math
 import os
 import time
-from contextlib import nullcontext
+from contextlib import contextmanager, nullcontext
 from pathlib import Path
 
 import torch
@@ -118,6 +119,35 @@ def evaluate(
     return 100.0 * correct / max(total, 1)
 
 
+@contextmanager
+def frozen_bn_stats(model: nn.Module):
+    """Forward in train mode (batch statistics) without updating the
+    BatchNorm running statistics, so held-out batches never leak into the
+    network state (paper Sec. 3.2: held-out data is reserved for phi)."""
+    bns = [
+        m
+        for m in model.modules()
+        if isinstance(m, nn.modules.batchnorm._BatchNorm)
+        and m.track_running_stats
+    ]
+    saved = [
+        (
+            m.running_mean.clone(),
+            m.running_var.clone(),
+            m.num_batches_tracked.clone(),
+        )
+        for m in bns
+    ]
+    try:
+        yield
+    finally:
+        with torch.no_grad():
+            for m, (mean, var, n) in zip(bns, saved):
+                m.running_mean.copy_(mean)
+                m.running_var.copy_(var)
+                m.num_batches_tracked.copy_(n)
+
+
 def _cycle(loader):
     while True:
         yield from loader
@@ -156,9 +186,12 @@ def _log_metrics(run_dir: Path | None, rec: dict) -> None:
 def train_fp(
     model, loaders, args, device, run_dir: Path | None = None, log=print
 ) -> dict:
-    """Fine-tune in full precision; saves last.pt (the ternary init)."""
+    """Fine-tune in full precision; saves last.pt (the ternary init).
+
+    The final-epoch weights are the init; nothing is selected on held-out.
+    """
     train_loader, held_loader, test_loader = loaders
-    history, best = [], -1.0
+    history = []
     ck = run_dir / "checkpoints" if run_dir is not None else None
     if args.fp_epochs > 0:
         opt = make_optimizer(
@@ -203,12 +236,6 @@ def train_fp(
                 f"[fp] epoch {epoch + 1}/{args.fp_epochs} "
                 f"loss {rec['train_loss']:.4f} heldout {held:.2f}%"
             )
-            if ck is not None and held > best:
-                best = held
-                _atomic_save(
-                    {"model": model.state_dict(), "epoch": epoch},
-                    ck / "best.pt",
-                )
     if ck is not None:
         _atomic_save(
             {"model": model.state_dict(), "epoch": args.fp_epochs},
@@ -261,7 +288,7 @@ def train_ternary(
     )
 
     ck_dir = run_dir / "checkpoints" if run_dir is not None else None
-    start_epoch, history, best = 0, [], -1.0
+    start_epoch, history = 0, []
     resume_from = _resume_path(run_dir, resume)
     if resume_from is not None and resume_from.exists():
         ck = torch.load(resume_from, map_location=device, weights_only=False)
@@ -273,7 +300,6 @@ def train_ternary(
             opt_phi.load_state_dict(ck["opt_phi"])
         sched.load_state_dict(ck["sched"])
         start_epoch, history = ck["epoch"] + 1, ck["history"]
-        best = max((h["heldout_acc_hard"] for h in history), default=-1.0)
         log(f"[resume] {resume_from} from epoch {start_epoch}")
     elif method.bilevel or method.joint:
         _warm_start_stats(
@@ -326,7 +352,7 @@ def train_ternary(
                 xv = xv.to(device, non_blocking=True)
                 yv = yv.to(device, non_blocking=True)
                 tau = method.set_thresholds(connected=True)
-                with autocast(device, args.amp):
+                with frozen_bn_stats(model), autocast(device, args.amp):
                     meta = crit(model(xv), yv)
                 meta = meta + method.regularizer(tau)
                 opt_phi.zero_grad(set_to_none=True)
@@ -379,16 +405,6 @@ def train_ternary(
                 "history": history,
             }
             _atomic_save(state, ck_dir / "last.pt")
-            if held > best:
-                best = held
-                _atomic_save(
-                    {
-                        "model": model.state_dict(),
-                        "method": method.state_dict(),
-                        "epoch": epoch,
-                    },
-                    ck_dir / "best.pt",
-                )
 
     method.finalize()
     test = evaluate(

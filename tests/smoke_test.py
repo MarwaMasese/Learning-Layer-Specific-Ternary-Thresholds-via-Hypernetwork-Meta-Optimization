@@ -85,10 +85,23 @@ def test_quantizer():
         tp_r.grad.abs() > 0 and tm_r.grad.abs() > 0,
         "hard_soft passes gradient to both thresholds",
     )
-    g = QuantState(5.0, 0.005, "geom")
+    from src.quantization.quantizers import ste_ternary
+
+    tp_r, tm_r = tp.clone().requires_grad_(), tm.clone().requires_grad_()
+    x_r = x.clone().requires_grad_()
+    q = ste_ternary(x_r, tp_r, tm_r)
+    check(torch.equal(q, hard), "STE forward is exactly Q_hard")
+    q.sum().backward()
     check(
-        abs(g.update_temperature(29, 30) - 0.005) < 1e-9,
-        "geom schedule reaches T_min",
+        bool((x_r.grad == 1).all())
+        and abs(tp_r.grad.item() + 0.5 * x.numel()) < 1e-3
+        and abs(tm_r.grad.item() + 0.5 * x.numel()) < 1e-3,
+        "STE: identity gradient to w, constant gradient to both τ",
+    )
+    lin = QuantState(5.0, 0.05, "linear")
+    check(
+        abs(lin.update_temperature(29, 30) - 0.05) < 1e-9,
+        "linear schedule reaches T_min",
     )
     st = QuantState(5.0, 0.05, "exp")
     Ts = [st.update_temperature(e, 30) for e in range(30)]
@@ -291,6 +304,19 @@ def test_phi_gradient():
         all(p.grad is not None and p.grad.abs().sum() > 0 for p in phi),
         "outer loss back-propagates to every hypernetwork parameter",
     )
+    from src.training.loop import frozen_bn_stats
+
+    bn = next(
+        mod for mod in model.modules() if isinstance(mod, torch.nn.BatchNorm2d)
+    )
+    before = bn.running_mean.clone()
+    model.train()
+    with frozen_bn_stats(model):
+        model(x)
+    check(
+        torch.equal(bn.running_mean, before),
+        "outer (held-out) forward leaves BN running stats unchanged",
+    )
     f = m.tracker.features()
     m2 = build_method(
         "ours", layers, ap.Namespace(**{**vars(args), "stats": "mu"})
@@ -385,7 +411,6 @@ def test_end_to_end(models):
                 "results.json",
                 "logs/metrics.jsonl",
                 "checkpoints/last.pt",
-                "checkpoints/best.pt",
             ]
             missing = [
                 f for f in need if not os.path.exists(os.path.join(fp_dir, f))

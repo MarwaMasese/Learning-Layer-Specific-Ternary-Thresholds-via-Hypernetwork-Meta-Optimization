@@ -56,17 +56,22 @@ def hard_ternary(w_n: torch.Tensor, tau_plus, tau_minus) -> torch.Tensor:
 
 
 def ste_ternary(w_n: torch.Tensor, tau_plus, tau_minus) -> torch.Tensor:
-    """Hard ternary forward, identity backward to w (straight-through).
+    """Hard ternary forward, straight-through (identity) backward.
 
-    Thresholds receive no gradient — this is the plain STE used by TWN and by
-    the "STE instead of Q_soft" ablation.
+    The STE of the paper (Sec. 2.2): the hard step is treated as an identity
+    in the backward pass, i.e. q is differentiated as if it were
+    w − (τ+ + τ−)/2. The weights get gradient 1 and each threshold the
+    constant −1/2, so the hypernetwork still receives a (constant-gradient)
+    meta-signal; this is the "STE instead of Q_soft" ablation of Tab. 4.
+    For TWN the thresholds are plain buffers, so only w is affected.
     """
     q = hard_ternary(
         w_n.detach(),
         tau_plus.detach() if torch.is_tensor(tau_plus) else tau_plus,
         tau_minus.detach() if torch.is_tensor(tau_minus) else tau_minus,
     )
-    return q + (w_n - w_n.detach())  # exact q forward, identity backward
+    g = w_n - 0.5 * (tau_plus + tau_minus)
+    return q + (g - g.detach())  # exact q forward, identity backward
 
 
 def soft_ste_ternary(
@@ -102,9 +107,11 @@ class QuantState:
 
     mode:
         "fp"   – no quantization (latent weights used directly)
-        "soft" – Q_soft at the current temperature (training, ours/fixed/...)
+        "soft" – Q_soft at the current temperature: the paper's training
+                 quantizer (Eq. 3), used by ours/fixed/perlayer
         "ste"  – hard forward, straight-through backward (TWN, STE ablation)
-        "hard_soft" – hard forward, Q_soft backward (train = eval weights)
+        "hard_soft" – hard forward, Q_soft backward. Not part of the paper;
+                 kept only as an opt-in option (--train_mode hard_soft)
         "hard" – exact ternary; used for every evaluation number we report
     """
 
@@ -115,7 +122,7 @@ class QuantState:
         schedule: str = "exp",
         mode: str = "soft",
     ):
-        assert schedule in ("exp", "geom", "linear", "const")
+        assert schedule in ("exp", "linear", "const")
         self.T0, self.T_min, self.schedule = T0, T_min, schedule
         self.mode = mode
         self.temperature = T_min if schedule == "const" else T0
@@ -126,15 +133,12 @@ class QuantState:
         exp:    T0 · exp(-5p)           (paper Sec. 3.3 default; with
                                          T0 = 5 the T_min = 0.05 floor is
                                          reached at p = ln(100)/5 ≈ 0.92)
-        geom:   T0 · (T_min / T0)^p     (geometric, reaches T_min at the end)
-        linear: T0 + (T_min - T0) · p   (ablation)
-        const:  T_min throughout        ("no annealing" ablation)
+        linear: T0 + (T_min - T0) · p   ("linear decay" ablation, Tab. 4)
+        const:  T_min throughout        ("no annealing" ablation, Tab. 4)
         """
         p = epoch / max(total_epochs - 1, 1)
         if self.schedule == "exp":
             T = self.T0 * math.exp(-5.0 * p)
-        elif self.schedule == "geom":
-            T = self.T0 * (self.T_min / self.T0) ** p
         elif self.schedule == "linear":
             T = self.T0 + (self.T_min - self.T0) * p
         else:

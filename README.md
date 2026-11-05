@@ -42,25 +42,28 @@ layer's own statistics.
 - **Bilevel training** (`src/training/loop.py`): θ is trained on the train
   split; every K = 5 inner steps, φ takes one step on a held-out batch (10% of
   the CIFAR train set, or 10 images per class for ImageNet), using a
-  first-order meta-gradient: θ is held fixed and nothing is unrolled through
-  the K inner steps, so memory does not grow with K and a larger K means
-  fewer (cheaper) outer steps.
-- **Soft quantizer** (`src/quantization/quantizers.py`): Eq. 4 of the paper,
-  with T(p) = 5·exp(−5p) floored at 0.05. With `--train_mode hard_soft` the forward
-  pass uses exact ternary weights and Q_soft only supplies the gradients;
-  this is the setting in `configs/*.json` (chosen on held-out accuracy by
-  `make_jobs.py select`), while the CLI default without `--config` is plain
-  `soft`. **Every reported accuracy uses exact hard ternary weights.**
+  first-order meta-gradient (Secs. 2.4 and 3.3: second-order terms are
+  omitted, as in first-order MAML). Held-out data is used only for this
+  update: it never updates BatchNorm statistics and never selects a
+  checkpoint.
+- **Soft quantizer** (`src/quantization/quantizers.py`): Q_soft, Eq. 4 of the
+  paper, is the training quantizer of the inner loop (Eq. 3), with
+  T(p) = 5·exp(−5p) floored at 0.05. The STE ablation (`--train_mode ste`)
+  uses a hard forward pass and an identity backward pass, which gives the
+  thresholds a constant gradient. **Every reported accuracy uses exact hard
+  ternary weights.**
 
 <p align="center">
   <img src="docs/figures/soft_quantizer.png" width="480"
        alt="Soft ternary quantizer for several temperatures; it approaches the hard quantizer as T decreases">
 </p>
 
-**Baselines** (`--method`): `fp`, `twn`, `ttq`, `lsq` (three levels),
-`rtn`, `fatnn`, `metaquant`, `fixed` (one global ±τ, same quantizer as ours,
-τ tuned on held-out data), `perlayer` (free per-layer τ), and `ours_joint`
-(single-level ablation). Every baseline runs under the same protocol as ours
+**Baselines** (`--method`), as in the paper's Tabs. 1 and 2: `twn`, `ttq`,
+`rtn`, `metaquant`, `lsq` (three levels) and `fatnn`, plus `fp`. The Tab. 4
+ablations use `perlayer` (free per-layer τ, no hypernetwork) and
+`ours_joint` (hypernetwork trained in a single level). Tab. 3 uses `fixed`
+(same pipeline, one global ±τ = 0.5, no hypernetwork) as the "without
+hypernetwork" reference for memory and time. Every baseline runs under the same protocol as ours
 (initialisation, data, epochs, optimizer, schedule) with ternary weights and
 full-precision activations. RTN, FATNN and MetaQuant use their published
 weight quantizers; the adaptations needed for this setting (MetaQuant with a
@@ -107,8 +110,7 @@ Each run writes `runs/<dataset>_<model>_<method><tag>_s<seed>/`:
 | `config.json` | fully resolved configuration |
 | `env.txt` | Python/torch/CUDA/timm versions, GPU, git commit, SLURM ids |
 | `logs/metrics.jsonl` | one JSON line per epoch (loss, held-out accuracy, T, thresholds) |
-| `checkpoints/last.pt` | resumable state; rerunning the same command resumes |
-| `checkpoints/best.pt` | weights with the best held-out accuracy |
+| `checkpoints/last.pt` | resumable state and final weights; rerunning the same command resumes |
 | `results.json` | final test accuracy, thresholds, per-layer profile, timing |
 
 ## Running sweeps
@@ -125,26 +127,27 @@ Resubmitting a jobs file skips finished runs and resumes unfinished ones.
 Run the FP wave of each jobs file first (the generated files do this, with a
 `---` barrier), then:
 
-| paper item | jobs | output of `aggregate.py --latex tables` |
+| paper item | jobs | output |
 |---|---|---|
-| Training-quantizer selection (held-out, not in the paper) | `make_jobs.py select` | read with `aggregate.py --heldout` |
-| Tab. 1, CIFAR-10/100 columns (ResNet-18, 3 seeds) | `make_jobs.py main --models resnet18 --config configs/cifar.json` | `paper_table1_resnet18.tex` |
+| Tab. 1, CIFAR-10/100 columns (ResNet-18, 3 seeds) | `make_jobs.py main --config configs/cifar.json` | `paper_table1_resnet18.tex` |
 | Tab. 1 ImageNet column, Tab. 2 (6 backbones, 1 seed) | `make_jobs.py imagenet --config configs/imagenet.json` | `paper_table1_resnet18.tex`, `paper_table2_imagenet.tex` |
-| Tab. 3 (params, FLOPs, HN overhead, memory) | same ImageNet runs (`ours` vs `fixed`) | `paper_table3_efficiency.tex` |
-| Tab. 4 ablations, Tab. 5 sensitivity (CIFAR-10, ResNet-18) | `make_jobs.py ablation --config configs/cifar.json` | `paper_table4_ablation.tex`, `paper_table5_sensitivity.tex` |
-| Extra: CIFAR on all six backbones, `fixed`/`perlayer` baselines | `make_jobs.py main --config configs/cifar.json` | `<dataset>_main.tex` |
+| Tab. 3 (params, FLOPs, HN overhead, memory) | the same ImageNet runs (`ours` vs `fixed`) | `paper_table3_efficiency.tex` |
+| Fig. 2 | the same ImageNet runs | `fig2_imagenet_efficiency.pdf` |
+| Tab. 4 ablations, Tab. 5 sensitivity (CIFAR-10, ResNet-18, 3 seeds) | `make_jobs.py ablation --config configs/cifar.json` | `paper_table4_ablation.tex`, `paper_table5_sensitivity.tex` |
+| Fig. 3 | the same ablation runs | `fig3_ablations.pdf` |
 
 ```bash
-python scripts/aggregate.py --latex tables              # paper layout, mean
+python scripts/aggregate.py --latex tables              # Tabs. 1-5 (mean)
 python scripts/aggregate.py --latex tables --paper_std  # mean ± std
+python scripts/plot_paper_figures.py --out plots        # Figs. 2-3
 ```
 
-Test accuracy is always that of the final-epoch model. The held-out split
-drives the outer loop and is used to choose settings (training quantizer,
-the fixed baseline's τ via `aggregate.py --heldout`); test accuracy is never
-used for any choice. See [`docs/paper_alignment.md`](docs/paper_alignment.md)
-for a line-by-line comparison of the paper and this code, including known
-differences.
+Every setting is fixed in advance in `configs/*.json` (paper Sec. 4.1).
+The held-out split is used only by the outer loop and for per-epoch
+monitoring. Reported accuracy is the test accuracy of the final-epoch model
+with exact ternary weights. Nothing is tuned on held-out or test data.
+[`docs/paper_alignment.md`](docs/paper_alignment.md) maps each part of the
+paper to the code and lists the paper statements the code cannot reproduce.
 
 ## Citation
 ```bibtex
