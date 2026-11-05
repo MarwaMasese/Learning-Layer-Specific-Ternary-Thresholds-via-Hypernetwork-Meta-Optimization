@@ -1,6 +1,6 @@
 -r requirements.txt
 
-# Figures (scripts/plot_thresholds.py).
+# Figures (scripts/plot_paper_figures.py, scripts/plot_thresholds.py).
 matplotlib
 
 # Formatting and linting tools.

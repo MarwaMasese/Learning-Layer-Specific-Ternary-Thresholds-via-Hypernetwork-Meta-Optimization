@@ -38,7 +38,7 @@ import torch.nn as nn
 def soft_ternary(
     w_n: torch.Tensor, tau_plus, tau_minus, T: float
 ) -> torch.Tensor:
-    """Q_soft (paper Eq. 9): σ((w-τ-)/T) + σ((w-τ+)/T) - 1.
+    """Q_soft (paper Eq. 4): σ((w-τ-)/T) + σ((w-τ+)/T) - 1.
 
     → +1 for w ≫ τ+, 0 for τ- ≪ w ≪ τ+, -1 for w ≪ τ-, and recovers
     `hard_ternary` as T → 0. Differentiable in w and in both thresholds.
@@ -51,22 +51,27 @@ def soft_ternary(
 
 
 def hard_ternary(w_n: torch.Tensor, tau_plus, tau_minus) -> torch.Tensor:
-    """Q_hard (Eq. 8): +1 if w > τ+, -1 if w < τ-, else 0. No gradient."""
+    """Q_hard: +1 if w > τ+, -1 if w < τ-, else 0 (Q_soft as T → 0)."""
     return (w_n > tau_plus).to(w_n.dtype) - (w_n < tau_minus).to(w_n.dtype)
 
 
 def ste_ternary(w_n: torch.Tensor, tau_plus, tau_minus) -> torch.Tensor:
-    """Hard ternary forward, identity backward to w (straight-through).
+    """Hard ternary forward, straight-through (identity) backward.
 
-    Thresholds receive no gradient — this is the plain STE used by TWN and by
-    the "STE instead of Q_soft" ablation.
+    The STE of the paper (Sec. 2.2): the hard step is treated as an identity
+    in the backward pass, i.e. q is differentiated as if it were
+    w − (τ+ + τ−)/2. The weights get gradient 1 and each threshold the
+    constant −1/2, so the hypernetwork still receives a (constant-gradient)
+    meta-signal; this is the "STE instead of Q_soft" ablation of Tab. 4.
+    For TWN the thresholds are plain buffers, so only w is affected.
     """
     q = hard_ternary(
         w_n.detach(),
         tau_plus.detach() if torch.is_tensor(tau_plus) else tau_plus,
         tau_minus.detach() if torch.is_tensor(tau_minus) else tau_minus,
     )
-    return q + (w_n - w_n.detach())  # exact q forward, identity backward
+    g = w_n - 0.5 * (tau_plus + tau_minus)
+    return q + (g - g.detach())  # exact q forward, identity backward
 
 
 def soft_ste_ternary(
@@ -102,9 +107,10 @@ class QuantState:
 
     mode:
         "fp"   – no quantization (latent weights used directly)
-        "soft" – Q_soft at the current temperature (training, ours/fixed/...)
+        "soft" – Q_soft at the current temperature: the paper's training
+                 quantizer (Eq. 3), used by ours/fixed/perlayer
         "ste"  – hard forward, straight-through backward (TWN, STE ablation)
-        "hard_soft" – hard forward, Q_soft backward (train = eval weights)
+        "hard_soft" – hard forward, Q_soft backward (optional)
         "hard" – exact ternary; used for every evaluation number we report
     """
 
@@ -115,7 +121,7 @@ class QuantState:
         schedule: str = "exp",
         mode: str = "soft",
     ):
-        assert schedule in ("exp", "geom", "linear", "const")
+        assert schedule in ("exp", "linear", "const")
         self.T0, self.T_min, self.schedule = T0, T_min, schedule
         self.mode = mode
         self.temperature = T_min if schedule == "const" else T0
@@ -123,16 +129,15 @@ class QuantState:
     def update_temperature(self, epoch: int, total_epochs: int) -> float:
         """T(p) for training progress p ∈ [0, 1], floored at T_min.
 
-        exp:    T0 · exp(-5p)           (paper default; floor 0.0067·T0)
-        geom:   T0 · (T_min / T0)^p     (geometric, reaches T_min at the end)
-        linear: T0 + (T_min - T0) · p   (ablation)
-        const:  T_min throughout        ("no annealing" ablation)
+        exp:    T0 · exp(-5p)           (paper Sec. 3.3 default; with
+                                         T0 = 5 the T_min = 0.05 floor is
+                                         reached at p = ln(100)/5 ≈ 0.92)
+        linear: T0 + (T_min - T0) · p   ("linear decay" ablation, Tab. 4)
+        const:  T_min throughout        ("no annealing" ablation, Tab. 4)
         """
         p = epoch / max(total_epochs - 1, 1)
         if self.schedule == "exp":
             T = self.T0 * math.exp(-5.0 * p)
-        elif self.schedule == "geom":
-            T = self.T0 * (self.T_min / self.T0) ** p
         elif self.schedule == "linear":
             T = self.T0 + (self.T_min - self.T0) * p
         else:

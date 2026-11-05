@@ -1,6 +1,8 @@
 # Learning Layer-Specific Ternary Thresholds via Hypernetwork Meta-Optimization
 
-Official code for the WACV 2027 paper. A compact hypernetwork, shared across
+Official code for the WACV 2027 paper *Learning Layer-Specific Ternary
+Thresholds via Hypernetwork Meta-Optimization* (Cornelius Maroa Masese,
+Ali Hussein, Ashery Mbilinyi). A compact hypernetwork, shared across
 all layers, reads each layer's activation and gradient statistics and outputs
 that layer's asymmetric ternary thresholds. It is trained by first-order
 bilevel optimization through a temperature-annealed soft quantizer. Every
@@ -38,21 +40,28 @@ layer's own statistics.
 - **Bilevel training** (`src/training/loop.py`): θ is trained on the train
   split; every K = 5 inner steps, φ takes one step on a held-out batch (10% of
   the CIFAR train set, or 10 images per class for ImageNet), using a
-  first-order meta-gradient.
-- **Soft quantizer** (`src/quantization/quantizers.py`): Eq. 9 of the paper,
-  with an annealed temperature. With `--train_mode hard_soft` the forward
-  pass uses exact ternary weights and Q_soft only supplies the gradients.
-  **Every reported accuracy uses exact hard ternary weights.**
+  first-order meta-gradient (Secs. 2.4 and 3.3: second-order terms are
+  omitted, as in first-order MAML). Held-out data is used only for this
+  update: it never updates BatchNorm statistics and never selects a
+  checkpoint.
+- **Soft quantizer** (`src/quantization/quantizers.py`): Q_soft, Eq. 4 of the
+  paper, is the training quantizer of the inner loop (Eq. 3), with
+  T(p) = 5·exp(−5p) floored at 0.05. The STE ablation (`--train_mode ste`)
+  uses a hard forward pass and an identity backward pass, which gives the
+  thresholds a constant gradient. **Every reported accuracy uses exact hard
+  ternary weights.**
 
 <p align="center">
   <img src="docs/figures/soft_quantizer.png" width="480"
        alt="Soft ternary quantizer for several temperatures; it approaches the hard quantizer as T decreases">
 </p>
 
-**Baselines** (`--method`): `fp`, `twn`, `ttq`, `lsq` (three levels),
-`rtn`, `fatnn`, `metaquant`, `fixed` (one global ±τ, same quantizer as ours,
-τ tuned on held-out data), `perlayer` (free per-layer τ), and `ours_joint`
-(single-level ablation). Every baseline runs under the same protocol as ours
+**Baselines** (`--method`), as in the paper's Tabs. 1 and 2: `twn`, `ttq`,
+`rtn`, `metaquant`, `lsq` (three levels) and `fatnn`, plus `fp`. The Tab. 4
+ablations use `perlayer` (free per-layer τ, no hypernetwork) and
+`ours_joint` (hypernetwork trained in a single level). Tab. 3 uses `fixed`
+(same pipeline, one global ±τ = 0.5, no hypernetwork) as the "without
+hypernetwork" reference for memory and time. Every baseline runs under the same protocol as ours
 (initialisation, data, epochs, optimizer, schedule) with ternary weights and
 full-precision activations. RTN, FATNN and MetaQuant use their published
 weight quantizers; the adaptations needed for this setting (MetaQuant with a
@@ -99,8 +108,7 @@ Each run writes `runs/<dataset>_<model>_<method><tag>_s<seed>/`:
 | `config.json` | fully resolved configuration |
 | `env.txt` | Python/torch/CUDA/timm versions, GPU, git commit, SLURM ids |
 | `logs/metrics.jsonl` | one JSON line per epoch (loss, held-out accuracy, T, thresholds) |
-| `checkpoints/last.pt` | resumable state; rerunning the same command resumes |
-| `checkpoints/best.pt` | weights with the best held-out accuracy |
+| `checkpoints/last.pt` | resumable state and final weights; rerunning the same command resumes |
 | `results.json` | final test accuracy, thresholds, per-layer profile, timing |
 
 ## Running sweeps
@@ -114,16 +122,41 @@ python scripts/gpu_queue.py jobs/main.txt --gpus 0,1
 Resubmitting a jobs file skips finished runs and resumes unfinished ones.
 
 ## Reproducing the paper
-| paper item | command (after the FP wave) |
-|---|---|
-| Training-quantizer selection (held-out) | `make_jobs.py select` |
-| CIFAR-10/100 tables (6 backbones, 3 seeds) | `make_jobs.py main --config configs/cifar.json` |
-| ImageNet table | `make_jobs.py imagenet --config configs/imagenet.json` |
-| Ablation and sensitivity table | `make_jobs.py ablation --config configs/cifar.json` |
-| All tables as LaTeX | `python scripts/aggregate.py --latex tables` |
+Run the FP wave of each jobs file first (the generated files do this, with a
+`---` barrier), then:
 
-Every setting (training quantizer, the fixed baseline's τ) is chosen on
-held-out accuracy (`aggregate.py --heldout`), never on test accuracy.
+| paper item | jobs | output |
+|---|---|---|
+| Tab. 1, CIFAR-10/100 columns (ResNet-18, 3 seeds) | `make_jobs.py main --config configs/cifar.json` | `paper_table1_resnet18.tex` |
+| Tab. 1 ImageNet column, Tab. 2 (6 backbones, 1 seed) | `make_jobs.py imagenet --config configs/imagenet.json` | `paper_table1_resnet18.tex`, `paper_table2_imagenet.tex` |
+| Tab. 3 (params, FLOPs, HN overhead, memory) | the same ImageNet runs (`ours` vs `fixed`) | `paper_table3_efficiency.tex` |
+| Fig. 2 | the same ImageNet runs | `fig2_imagenet_efficiency.pdf` |
+| Tab. 4 ablations, Tab. 5 sensitivity (CIFAR-10, ResNet-18, 3 seeds) | `make_jobs.py ablation --config configs/cifar.json` | `paper_table4_ablation.tex`, `paper_table5_sensitivity.tex` |
+| Fig. 3 | the same ablation runs | `fig3_ablations.pdf` |
+
+```bash
+python scripts/aggregate.py --latex tables              # Tabs. 1-5 (mean)
+python scripts/aggregate.py --latex tables --paper_std  # mean ± std
+python scripts/plot_paper_figures.py --out plots        # Figs. 2-3
+```
+
+Every setting is fixed in advance in `configs/*.json` (paper Sec. 4.1).
+The held-out split is used only by the outer loop and for per-epoch
+monitoring. Reported accuracy is the test accuracy of the final-epoch model
+with exact ternary weights. Nothing is tuned on held-out or test data.
+
+## Citation
+```bibtex
+@inproceedings{masese2027ternary,
+  title     = {Learning Layer-Specific Ternary Thresholds via Hypernetwork
+               Meta-Optimization},
+  author    = {Masese, Cornelius Maroa and Hussein, Ali and
+               Mbilinyi, Ashery},
+  booktitle = {Proceedings of the IEEE/CVF Winter Conference on
+               Applications of Computer Vision (WACV)},
+  year      = {2027}
+}
+```
 
 ## Development
 ```bash

@@ -12,7 +12,8 @@ step t are W̃_t = W_{t-1} − η·M_φ(g_Ŵ^{t-1}, W̃_{t-1}), so
     ∂ℓ_t/∂φ = M(g_Ŵ^t, W̃_t) · ∂W̃_t/∂φ
             = −η · M(g_Ŵ^t, W̃_t) · ∂M_φ(g_Ŵ^{t-1}, W̃_{t-1})/∂φ.
 
-Adaptations for this benchmark (stated in the paper's protocol section):
+Adaptations for this benchmark (the paper reproduces every baseline under
+one W1/A32 protocol, Sec. 4.1):
   * Q is TWN ternarization (Δ = 0.7·E|W|, scale = mean |W| above Δ) instead
     of the binary BWN/DoReFa quantizers of the original paper.
   * Meta network: MultiFC (Eq. 10), M_φ(g, w̃) = g · FCs(w̃), two linear
