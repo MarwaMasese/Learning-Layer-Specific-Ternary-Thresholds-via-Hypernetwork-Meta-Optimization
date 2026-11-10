@@ -103,9 +103,7 @@ def test_quantizer():
     tp_r, tm_r = tp.clone().requires_grad_(), tm.clone().requires_grad_()
     x_r = x.clone().requires_grad_()
     q = ste_ternary(x_r, tp_r, tm_r, tau_grad=True)
-    check(
-        torch.equal(q, hard), "STE --ste-tau-grad forward is exactly Q_hard"
-    )
+    check(torch.equal(q, hard), "STE --ste-tau-grad forward is exactly Q_hard")
     q.sum().backward()
     check(
         bool((x_r.grad == 1).all())
