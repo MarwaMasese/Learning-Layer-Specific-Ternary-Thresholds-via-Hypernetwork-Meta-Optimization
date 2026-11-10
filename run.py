@@ -218,11 +218,22 @@ def build_parser() -> argparse.ArgumentParser:
         "--train_mode",
         "--train-mode",
         dest="train_mode",
-        default="soft",
+        default="hard_soft",
         choices=("soft", "ste", "hard_soft"),
-        help="training quantizer for ours/fixed/perlayer: soft = Q_soft "
-        "(Eq. 3); ste = STE ablation (Tab. 4); hard_soft = hard forward, "
-        "Q_soft backward",
+        help="training quantizer for ours/fixed/perlayer: hard_soft = hard "
+        "forward, Q_soft backward (default; what the published tables used); "
+        "soft = Q_soft forward and backward (Eq. 3, matches the paper's "
+        "text, does not reproduce the published tables); ste = STE ablation "
+        "(Tab. 4)",
+    )
+    add(
+        "--ste_tau_grad",
+        "--ste-tau-grad",
+        dest="ste_tau_grad",
+        action="store_true",
+        help="in --train-mode ste, give each threshold the constant -1/2 "
+        "gradient of Sec. 3.3 instead of no gradient at all. More faithful "
+        "to the text; does not reproduce the published Tab. 4 STE row",
     )
 
     g = p.add_argument_group("soft quantizer")
@@ -454,7 +465,12 @@ def main(argv: list[str] | None = None) -> int:
         layers = ternarize(model)
         profile = layer_weight_profile(model)
         model.to(device)
-        qstate = QuantState(args.T0, args.T_min, args.temp_schedule)
+        qstate = QuantState(
+            args.T0,
+            args.T_min,
+            args.temp_schedule,
+            ste_tau_grad=args.ste_tau_grad,
+        )
         set_qstate(model, qstate)
         method = build_method(args.method, layers, args).to(device)
 

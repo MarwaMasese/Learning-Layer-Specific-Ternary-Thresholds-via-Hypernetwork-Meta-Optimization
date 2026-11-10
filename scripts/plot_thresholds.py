@@ -2,7 +2,7 @@
 
     python scripts/plot_thresholds.py \\
         --ours runs/cifar10_resnet18_ours_s0 \\
-        --compare "Fixed τ=runs/cifar10_resnet18_fixed_s0" \\
+        --compare "Per-layer τ=runs/cifar10_resnet18_perlayer_s0" \\
         --compare TWN=runs/cifar10_resnet18_twn_s0 \\
         --compare LSQ=runs/cifar10_resnet18_lsq_s0 \\
         --title ResNet-18 --out plots/threshold_evolution_resnet18.pdf

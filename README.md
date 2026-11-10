@@ -40,16 +40,22 @@ layer's own statistics.
 - **Bilevel training** (`src/training/loop.py`): θ is trained on the train
   split; every K = 5 inner steps, φ takes one step on a held-out batch (10% of
   the CIFAR train set, or 10 images per class for ImageNet), using a
-  first-order meta-gradient (Secs. 2.4 and 3.3: second-order terms are
+  first-order meta-gradient (Secs. 3.2 and 3.3: second-order terms are
   omitted, as in first-order MAML). Held-out data is used only for this
   update: it never updates BatchNorm statistics and never selects a
   checkpoint.
 - **Soft quantizer** (`src/quantization/quantizers.py`): Q_soft, Eq. 4 of the
-  paper, is the training quantizer of the inner loop (Eq. 3), with
-  T(p) = 5·exp(−5p) floored at 0.05. The STE ablation (`--train_mode ste`)
-  uses a hard forward pass and an identity backward pass, which gives the
-  thresholds a constant gradient. **Every reported accuracy uses exact hard
-  ternary weights.**
+  paper, with T(p) = 5·exp(−5p) floored at 0.05. The default
+  `--train-mode hard_soft` takes the forward pass from the exact ternary
+  weights and the gradients from Q_soft, so training and evaluation use the
+  same weights; `--train-mode soft` uses Q_soft for both, which is the
+  literal reading of the inner loop (Eq. 3). See
+  [Which setting reproduces the paper](#which-setting-reproduces-the-paper).
+  The STE ablation (`--train-mode ste`) uses a hard forward pass with an
+  identity backward pass for the weights and, by default, no gradient at all
+  to the thresholds; `--ste-tau-grad` instead gives each threshold the
+  constant −1/2 gradient of Sec. 3.3.
+  **Every reported accuracy uses exact hard ternary weights.**
 
 <p align="center">
   <img src="docs/figures/soft_quantizer.png" width="480"
@@ -144,6 +150,27 @@ Every setting is fixed in advance in `configs/*.json` (paper Sec. 4.1).
 The held-out split is used only by the outer loop and for per-epoch
 monitoring. Reported accuracy is the test accuracy of the final-epoch model
 with exact ternary weights. Nothing is tuned on held-out or test data.
+
+### Which setting reproduces the paper
+
+The shipped defaults are the ones the published tables were run with. Two
+options depart from them, and both are off by default:
+
+| option | default | effect |
+|---|---|---|
+| `--train-mode soft` | `hard_soft` | Trains on the smooth weights while accuracy is still reported on hard ternary ones. This is the literal reading of Eq. 3, but train and eval weights then differ, and it does **not** reproduce the published tables. Affects `ours`, `fixed` and `perlayer`, i.e. the "Ours" row of Tabs. 1–2, Tab. 3's accuracy column and all of Tabs. 4–5. |
+| `--ste-tau-grad` | off | Gives each threshold the constant −1/2 gradient Sec. 3.3 describes. Without it the thresholds get no gradient, so in `--train-mode ste` the hypernetwork stays at its initialisation and Tab. 4's "STE instead of Q_soft" row measures a *frozen* hypernetwork rather than STE as such. The flag is the more faithful reading of the text; the published −3.3% was measured without it. |
+
+Two further notes on reading the paper against this code:
+
+- Tab. 3's **Mem. Cost** column is the ratio of peak *training* memory, ours
+  against the `fixed` baseline — not model memory. The caption's "total model
+  memory with and without the hypernetwork" cannot be the measured quantity:
+  the hypernetwork is 4,610 parameters, far too few to account for 1.06–1.10×.
+- The paper's tables and Figs. 2–3 are typeset by hand in the paper source.
+  `aggregate.py --latex` and `plot_paper_figures.py` regenerate the same rows,
+  columns and grouping from run directories as a cross-check; they are not the
+  source the paper was built from.
 
 ## Citation
 ```bibtex

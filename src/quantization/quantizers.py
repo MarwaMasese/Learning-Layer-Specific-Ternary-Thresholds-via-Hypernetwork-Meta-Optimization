@@ -55,23 +55,40 @@ def hard_ternary(w_n: torch.Tensor, tau_plus, tau_minus) -> torch.Tensor:
     return (w_n > tau_plus).to(w_n.dtype) - (w_n < tau_minus).to(w_n.dtype)
 
 
-def ste_ternary(w_n: torch.Tensor, tau_plus, tau_minus) -> torch.Tensor:
+def ste_ternary(
+    w_n: torch.Tensor, tau_plus, tau_minus, tau_grad: bool = False
+) -> torch.Tensor:
     """Hard ternary forward, straight-through (identity) backward.
 
-    The STE of the paper (Sec. 2.2): the hard step is treated as an identity
-    in the backward pass, i.e. q is differentiated as if it were
-    w − (τ+ + τ−)/2. The weights get gradient 1 and each threshold the
-    constant −1/2, so the hypernetwork still receives a (constant-gradient)
-    meta-signal; this is the "STE instead of Q_soft" ablation of Tab. 4.
-    For TWN the thresholds are plain buffers, so only w is affected.
+    The weights always get gradient 1. ``tau_grad`` selects what the
+    thresholds get, and the two settings are not equivalent:
+
+    ``tau_grad=False`` (default, and what the published tables were run
+        with): the thresholds get no gradient at all. For the Tab. 4 "STE
+        instead of Q_soft" row this means the hypernetwork receives no
+        meta-signal whatsoever and stays at its initialisation, so that row
+        measures a *frozen* hypernetwork rather than STE as such.
+
+    ``tau_grad=True`` (``--ste-tau-grad``): q is differentiated as if it
+        were w − (τ+ + τ−)/2, so each threshold gets the constant −1/2 and
+        the hypernetwork receives the constant-gradient meta-signal that
+        Sec. 3.3 actually describes. Note the resulting threshold gradient
+        is −0.5·Σ(incoming gradient) over the whole weight tensor: it scales
+        with layer size and carries no information about which weights lie
+        near a threshold, which is precisely why it is a poor meta-signal.
+        This is the more faithful reading of the paper's text, but it does
+        not reproduce the published Tab. 4 value.
+
+    For TWN the thresholds are plain buffers, so only w is ever affected.
     """
     q = hard_ternary(
         w_n.detach(),
         tau_plus.detach() if torch.is_tensor(tau_plus) else tau_plus,
         tau_minus.detach() if torch.is_tensor(tau_minus) else tau_minus,
     )
-    g = w_n - 0.5 * (tau_plus + tau_minus)
-    return q + (g - g.detach())  # exact q forward, identity backward
+    # exact q forward, identity backward
+    g = w_n - 0.5 * (tau_plus + tau_minus) if tau_grad else w_n
+    return q + (g - g.detach())
 
 
 def soft_ste_ternary(
@@ -107,11 +124,16 @@ class QuantState:
 
     mode:
         "fp"   – no quantization (latent weights used directly)
-        "soft" – Q_soft at the current temperature: the paper's training
-                 quantizer (Eq. 3), used by ours/fixed/perlayer
+        "soft" – Q_soft at the current temperature: the training quantizer
+                 of the inner loop (Eq. 3). Matches the paper's text, but
+                 trains on smooth weights while we report hard ternary ones
         "ste"  – hard forward, straight-through backward (TWN, STE ablation)
-        "hard_soft" – hard forward, Q_soft backward (optional)
+        "hard_soft" – hard forward, Q_soft backward; train and eval weights
+                 coincide. This is the setting the published tables used
         "hard" – exact ternary; used for every evaluation number we report
+
+    ``ste_tau_grad`` picks which STE the "ste" mode uses; see
+    :func:`ste_ternary`.
     """
 
     def __init__(
@@ -120,10 +142,12 @@ class QuantState:
         T_min: float = 0.05,
         schedule: str = "exp",
         mode: str = "soft",
+        ste_tau_grad: bool = False,
     ):
         assert schedule in ("exp", "linear", "const")
         self.T0, self.T_min, self.schedule = T0, T_min, schedule
         self.mode = mode
+        self.ste_tau_grad = ste_tau_grad
         self.temperature = T_min if schedule == "const" else T0
 
     def update_temperature(self, epoch: int, total_epochs: int) -> float:

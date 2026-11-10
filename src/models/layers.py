@@ -56,7 +56,9 @@ class _TernaryMixin:
         if st.mode == "soft":
             q = soft_ternary(w_n, tau[0], tau[1], st.temperature)
         elif st.mode == "ste":
-            q = ste_ternary(w_n, tau[0], tau[1])
+            q = ste_ternary(
+                w_n, tau[0], tau[1], getattr(st, "ste_tau_grad", False)
+            )
         elif st.mode == "hard_soft":
             q = soft_ste_ternary(w_n, tau[0], tau[1], st.temperature)
         elif st.mode == "hard":
