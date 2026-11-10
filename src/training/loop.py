@@ -21,7 +21,7 @@ step, as in first-order DARTS / MAML); the K inner steps use K distinct
 batches. Every reported accuracy comes from ``evaluate(..., mode="hard")``:
 exact ternary weights {-alpha_l, 0, +alpha_l}.
 
-This is the first-order approximation of Sec. 2.4 / 3.3 (second-order
+This is the first-order approximation of Secs. 3.2 / 3.3 (second-order
 terms of the bilevel meta-gradient are omitted, as in first-order MAML):
 L_val is evaluated at the theta reached after the K inner steps, and its
 gradient reaches phi through the thresholds of the quantizer (Q_soft, or the

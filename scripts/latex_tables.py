@@ -1,8 +1,9 @@
 """LaTeX tables for the paper, generated from aggregated runs.
 
-Called by ``scripts/aggregate.py --latex <dir>``. Each file reproduces one
-table of the paper (same rows, columns and grouping), so no
-table number is ever typed by hand:
+Called by ``scripts/aggregate.py --latex <dir>``. Each file holds the
+``tabular`` body for one table of the paper, with the same rows, columns
+and grouping, ready to be wrapped in that table's ``table`` environment
+(caption, label and resizebox stay in the .tex of the paper):
 
     paper_table1_resnet18.tex     Tab. 1  ResNet-18, CIFAR-10/100 + ImageNet
     paper_table2_imagenet.tex     Tab. 2  ImageNet, six backbones
@@ -12,6 +13,8 @@ table number is ever typed by hand:
 """
 
 from __future__ import annotations
+
+import math
 
 import os
 
@@ -42,7 +45,7 @@ def _write(path: str, lines: list[str]) -> None:
 
 
 def _mean(runs: list, key: str) -> float:
-    v = [r[key] for r in runs if r.get(key)]
+    v = [r[key] for r in runs if r.get(key) is not None]
     return float(np.mean(v)) if v else float("nan")
 
 
@@ -220,8 +223,9 @@ def write_paper_tables(out_dir, groups, stat, paired, std=False) -> list:
 
     # Tab. 3: ImageNet efficiency. "Mem. Cost" is the peak training-memory
     # ratio of ours to the fixed baseline (same quantizer, no hypernetwork).
+    imagenet_cols = cols
     rows, times = [], []
-    for _, m in cols:
+    for _, m in imagenet_cols:
         o = groups[("imagenet", m, "ours")]
         f = groups.get(("imagenet", m, "fixed"), [])
         macs = o[0].get("macs")
@@ -237,12 +241,15 @@ def write_paper_tables(out_dir, groups, stat, paired, std=False) -> list:
             if f
             else float("nan")
         )
-        times.append(f"% {m}: time/epoch ours/fixed = {t:.2f}x")
+        times.append(
+            f"% {m}: time/epoch ours/fixed = "
+            + (f"{t:.2f}x" if math.isfinite(t) else "n/a")
+        )
         rows.append(
             f"{MODEL_PRETTY[m]} & {o[0]['params'] / 1e6:.1f}M & "
             + (f"{macs / 1e9:.1f}G" if macs else "--")
             + f" & {_cell(acc, std)} & {hn:.2f}\\% & "
-            + rf"{mem:.2f}$\times$"
+            + (rf"{mem:.2f}$\times$" if math.isfinite(mem) else "--")
             + EOL
         )
     if rows:

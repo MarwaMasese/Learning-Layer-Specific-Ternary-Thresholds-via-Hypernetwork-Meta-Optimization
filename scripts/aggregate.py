@@ -6,7 +6,9 @@
     python scripts/aggregate.py --heldout       # HELD-OUT accuracy, for
                                                 # monitoring only
 
-Every number in the paper's tables comes from this script. Runs are grouped
+The paper's tables are meant to be regenerated from this script rather
+than edited by hand; scripts/latex_tables.py holds the layouts. Runs are
+grouped
 by (dataset, model, method + tag); the seed count n is always shown, so
 incomplete groups are visible. Reported accuracy is the final-epoch model's
 test accuracy with exact ternary weights; held-out accuracy is never used to

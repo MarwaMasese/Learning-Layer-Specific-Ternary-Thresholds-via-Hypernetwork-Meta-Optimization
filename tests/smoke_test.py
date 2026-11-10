@@ -94,9 +94,24 @@ def test_quantizer():
     q.sum().backward()
     check(
         bool((x_r.grad == 1).all())
+        and tp_r.grad is None
+        and tm_r.grad is None,
+        "STE default: identity gradient to w, no gradient to either tau "
+        "(the setting the published tables were run with)",
+    )
+
+    tp_r, tm_r = tp.clone().requires_grad_(), tm.clone().requires_grad_()
+    x_r = x.clone().requires_grad_()
+    q = ste_ternary(x_r, tp_r, tm_r, tau_grad=True)
+    check(
+        torch.equal(q, hard), "STE --ste-tau-grad forward is exactly Q_hard"
+    )
+    q.sum().backward()
+    check(
+        bool((x_r.grad == 1).all())
         and abs(tp_r.grad.item() + 0.5 * x.numel()) < 1e-3
         and abs(tm_r.grad.item() + 0.5 * x.numel()) < 1e-3,
-        "STE: identity gradient to w, constant gradient to both τ",
+        "STE --ste-tau-grad: identity to w, constant -1/2 to both tau",
     )
     lin = QuantState(5.0, 0.05, "linear")
     check(

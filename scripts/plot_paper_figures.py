@@ -47,7 +47,7 @@ def _style(ax) -> None:
 
 
 def _mean(runs: list, key: str) -> float | None:
-    v = [r[key] for r in runs if r.get(key)]
+    v = [r[key] for r in runs if r.get(key) is not None]
     return float(np.mean(v)) if v else None
 
 
@@ -56,9 +56,10 @@ def fig2(groups: dict, path: str) -> bool:
     for m, label in MODEL_PRETTY.items():
         o = groups.get(("imagenet", m, "ours"), [])
         f = groups.get(("imagenet", m, "fixed"), [])
-        if not o:
+        s = stat(o, "test")
+        if not o or s is None:
             continue
-        acc = stat(o, "test")[0]
+        acc = s[0]
         po, pf = _mean(o, "peak_mem_mb"), _mean(f, "peak_mem_mb")
         rows.append((label, acc, po / pf if po and pf else np.nan))
     if not rows:
@@ -114,13 +115,17 @@ def fig3(groups: dict, path: str) -> bool:
     for title, items in PAPER_ABLATION_GROUPS:
         if title not in FIG3_GROUPS:
             continue
-        present = [(v, lab) for v, lab in items if groups.get(key + (v,))]
+        present = [
+            (lab, s)
+            for v, lab in items
+            if (s := stat(groups.get(key + (v,), []), "test")) is not None
+        ]
         if not present:
             continue
         heads.append((len(labels), title))
-        for v, lab in present:
+        for lab, s in present:
             labels.append(lab)
-            vals.append(stat(groups[key + (v,)], "test")[0])
+            vals.append(s[0])
     if not vals:
         return False
     n = len(vals)
