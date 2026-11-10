@@ -83,9 +83,6 @@ class Method(nn.Module):
     def phi_params(self) -> List[nn.Parameter]:
         return []
 
-    def theta_extra_params(self) -> List[nn.Parameter]:
-        return []
-
     def set_thresholds(self, connected: bool) -> Optional[torch.Tensor]:
         """Install thresholds on every layer before a forward pass.
 
@@ -165,11 +162,6 @@ class _ModuleQuantizer(Method):
         for layer in self.layers:
             layer.quantizer = type(self).factory(layer.weight)
 
-    def theta_extra_params(self):
-        return [
-            p for layer in self.layers for p in layer.quantizer.parameters()
-        ]
-
     def finalize(self):
         pass
 
@@ -215,9 +207,6 @@ class MetaQuant(_ModuleQuantizer):
         self.current_lr = args.lr
         for layer in self.layers:
             layer.quantizer = MetaQuantTernary(self.meta)
-
-    def theta_extra_params(self):
-        return []
 
     @property
     def meta_opt(self):

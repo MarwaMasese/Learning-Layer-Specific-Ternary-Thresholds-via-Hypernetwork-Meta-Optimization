@@ -85,10 +85,36 @@ def test_quantizer():
         tp_r.grad.abs() > 0 and tm_r.grad.abs() > 0,
         "hard_soft passes gradient to both thresholds",
     )
-    g = QuantState(5.0, 0.005, "geom")
+    from src.quantization.quantizers import ste_ternary
+
+    tp_r, tm_r = tp.clone().requires_grad_(), tm.clone().requires_grad_()
+    x_r = x.clone().requires_grad_()
+    q = ste_ternary(x_r, tp_r, tm_r)
+    check(torch.equal(q, hard), "STE forward is exactly Q_hard")
+    q.sum().backward()
     check(
-        abs(g.update_temperature(29, 30) - 0.005) < 1e-9,
-        "geom schedule reaches T_min",
+        bool((x_r.grad == 1).all())
+        and tp_r.grad is None
+        and tm_r.grad is None,
+        "STE default: identity gradient to w, no gradient to either tau "
+        "(the setting the published tables were run with)",
+    )
+
+    tp_r, tm_r = tp.clone().requires_grad_(), tm.clone().requires_grad_()
+    x_r = x.clone().requires_grad_()
+    q = ste_ternary(x_r, tp_r, tm_r, tau_grad=True)
+    check(torch.equal(q, hard), "STE --ste-tau-grad forward is exactly Q_hard")
+    q.sum().backward()
+    check(
+        bool((x_r.grad == 1).all())
+        and abs(tp_r.grad.item() + 0.5 * x.numel()) < 1e-3
+        and abs(tm_r.grad.item() + 0.5 * x.numel()) < 1e-3,
+        "STE --ste-tau-grad: identity to w, constant -1/2 to both tau",
+    )
+    lin = QuantState(5.0, 0.05, "linear")
+    check(
+        abs(lin.update_temperature(29, 30) - 0.05) < 1e-9,
+        "linear schedule reaches T_min",
     )
     st = QuantState(5.0, 0.05, "exp")
     Ts = [st.update_temperature(e, 30) for e in range(30)]
@@ -291,6 +317,19 @@ def test_phi_gradient():
         all(p.grad is not None and p.grad.abs().sum() > 0 for p in phi),
         "outer loss back-propagates to every hypernetwork parameter",
     )
+    from src.training.loop import frozen_bn_stats
+
+    bn = next(
+        mod for mod in model.modules() if isinstance(mod, torch.nn.BatchNorm2d)
+    )
+    before = bn.running_mean.clone()
+    model.train()
+    with frozen_bn_stats(model):
+        model(x)
+    check(
+        torch.equal(bn.running_mean, before),
+        "outer (held-out) forward leaves BN running stats unchanged",
+    )
     f = m.tracker.features()
     m2 = build_method(
         "ours", layers, ap.Namespace(**{**vars(args), "stats": "mu"})
@@ -301,6 +340,51 @@ def test_phi_gradient():
         and torch.equal(m2.tracker.features()[:, 0], f[:, 0]),
         "stat masking zeroes the ablated features only",
     )
+
+
+def test_paper_tables():
+    """MAC count matches paper Tab. 3; paper-layout tables are written."""
+    print("paper tables")
+    from src.models.backbones import count_macs
+
+    macs = count_macs(build_model("resnet18", 1000, 224, pretrained=False))
+    check(
+        abs(macs / 1e9 - 1.8) < 0.05,
+        f"resnet18 MACs {macs / 1e9:.2f}G ≈ 1.8G (paper Tab. 3)",
+    )
+
+    sys.path.insert(0, os.path.join(ROOT, "scripts"))
+    from aggregate import paired, stat
+    from latex_tables import write_paper_tables
+
+    def run(ds, model, acc, seed=0):
+        return {
+            "config": {"seed": seed},
+            "test_acc": acc,
+            "params": 11_700_000,
+            "method_params": 4610,
+            "macs": macs,
+            "peak_mem_mb": 1000.0,
+            "mean_epoch_time_s": 10.0,
+        }
+
+    groups = {}
+    for ds in ("cifar10", "imagenet"):
+        for v, acc in (("fp", 95.0), ("lsq", 90.0), ("ours", 92.0)):
+            groups[(ds, "resnet18", v)] = [run(ds, "resnet18", acc)]
+        groups[(ds, "resnet18", "fixed")] = [run(ds, "resnet18", 89.0)]
+    groups[("cifar10", "resnet18", "ours_k1")] = [run("", "", 91.0)]
+    tmp = tempfile.mkdtemp()
+    try:
+        names = write_paper_tables(tmp, groups, stat, paired)
+        check(
+            len(names) == 5,
+            f"all five paper tables written ({len(names)})",
+        )
+        t1 = open(os.path.join(tmp, "paper_table1_resnet18.tex")).read()
+        check("+2.0" in t1 and "W2/A2" in t1, "Tab. 1 has vs. LSQ and W/A")
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
 
 
 def test_end_to_end(models):
@@ -340,7 +424,6 @@ def test_end_to_end(models):
                 "results.json",
                 "logs/metrics.jsonl",
                 "checkpoints/last.pt",
-                "checkpoints/best.pt",
             ]
             missing = [
                 f for f in need if not os.path.exists(os.path.join(fp_dir, f))
@@ -469,6 +552,7 @@ if __name__ == "__main__":
     for name in (BACKBONES if a.all else ["resnet18", "mobilenetv2"]):
         test_backbone(name)
     test_phi_gradient()
+    test_paper_tables()
     test_end_to_end(["resnet18", "vit_s16"] if a.all else ["resnet18"])
     print(
         f"\n{'ALL PASSED' if not check.failed else f'{check.failed} FAILED'}"

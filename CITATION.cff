@@ -1,0 +1,26 @@
+cff-version: 1.2.0
+message: "If you use this code, please cite the paper below."
+title: "Learning Layer-Specific Ternary Thresholds via Hypernetwork Meta-Optimization"
+authors:
+  - family-names: Masese
+    given-names: Cornelius Maroa
+    affiliation: Vociply LTD
+  - family-names: Hussein
+    given-names: Ali
+    affiliation: Alveus Labs
+  - family-names: Mbilinyi
+    given-names: Ashery
+    affiliation: University of Victoria
+repository-code: "https://github.com/MarwaMasese/Learning-Layer-Specific-Ternary-Thresholds-via-Hypernetwork-Meta-Optimization"
+preferred-citation:
+  type: conference-paper
+  title: "Learning Layer-Specific Ternary Thresholds via Hypernetwork Meta-Optimization"
+  authors:
+    - family-names: Masese
+      given-names: Cornelius Maroa
+    - family-names: Hussein
+      given-names: Ali
+    - family-names: Mbilinyi
+      given-names: Ashery
+  collection-title: "Proceedings of the IEEE/CVF Winter Conference on Applications of Computer Vision (WACV)"
+  year: 2027
