@@ -15,7 +15,6 @@ and grouping, ready to be wrapped in that table's ``table`` environment
 from __future__ import annotations
 
 import math
-
 import os
 
 import numpy as np
