@@ -1,8 +1,7 @@
 # Learning Layer-Specific Ternary Thresholds via Hypernetwork Meta-Optimization
 
 Official code for the WACV 2027 paper *Learning Layer-Specific Ternary
-Thresholds via Hypernetwork Meta-Optimization* (Cornelius Maroa Masese,
-Ali Hussein, Ashery Mbilinyi).
+Thresholds via Hypernetwork Meta-Optimization*
 
 Ternary quantization needs a threshold that decides which weights get zeroed.
 Most methods pick one for the whole network. Here a small hypernetwork, shared
