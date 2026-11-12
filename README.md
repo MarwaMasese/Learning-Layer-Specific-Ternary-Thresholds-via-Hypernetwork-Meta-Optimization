@@ -2,16 +2,22 @@
 
 Official code for the WACV 2027 paper *Learning Layer-Specific Ternary
 Thresholds via Hypernetwork Meta-Optimization* (Cornelius Maroa Masese,
-Ali Hussein, Ashery Mbilinyi). A compact hypernetwork, shared across
-all layers, reads each layer's activation and gradient statistics and outputs
-that layer's asymmetric ternary thresholds. It is trained by first-order
-bilevel optimization through a temperature-annealed soft quantizer. Every
-number in the paper comes from a run directory produced by this code and
+Ali Hussein, Ashery Mbilinyi).
+
+Ternary quantization needs a threshold that decides which weights get zeroed.
+Most methods pick one for the whole network. Here a small hypernetwork, shared
+across all layers, reads each layer's activation and gradient statistics and
+outputs that layer's two thresholds. It is trained by first-order bilevel
+optimization through a soft quantizer whose temperature is annealed.
+
+Every number in the paper comes from a run directory produced by this code and
 summarized by `scripts/aggregate.py`.
 
 <p align="center">
-  <img src="docs/figures/bilevel_pipeline.png" width="760"
-       alt="Bilevel training: the inner loop updates weights with thresholds from the hypernetwork; the outer loop updates the hypernetwork on held-out data">
+  <img src="docs/figures/compromise_paradox.png" width="760"
+       alt="Left: one global threshold over-prunes a concentrated deep layer and under-compresses a diffuse early layer. Right: per-layer thresholds fit each distribution.">
+  <br><em>Fig. 1 of the paper: one global threshold cannot suit layers whose
+  weights are spread differently.</em>
 </p>
 
 ## Method
@@ -21,11 +27,6 @@ distributed, so one threshold can zero out too much of one layer and too
 little of another. The hypernetwork sets each layer's thresholds from that
 layer's own statistics.
 
-<p align="center">
-  <img src="docs/figures/threshold_illustration.png" width="760"
-       alt="Schematic: one static threshold versus layer-specific thresholds on two idealized weight distributions">
-  <br><em>Schematic with two idealized weight distributions.</em>
-</p>
 
 - **Ternary layers** (`src/models/layers.py`): every Conv2d/Linear except the
   stem and the classifier computes `W_q = α_l · Q(W / σ(W); τ+, τ−)`, with a
@@ -57,10 +58,6 @@ layer's own statistics.
   constant −1/2 gradient of Sec. 3.3.
   **Every reported accuracy uses exact hard ternary weights.**
 
-<p align="center">
-  <img src="docs/figures/soft_quantizer.png" width="480"
-       alt="Soft ternary quantizer for several temperatures; it approaches the hard quantizer as T decreases">
-</p>
 
 **Baselines** (`--method`), as in the paper's Tabs. 1 and 2: `twn`, `ttq`,
 `rtn`, `metaquant`, `lsq` (three levels) and `fatnn`, plus `fp`. The Tab. 4
@@ -76,6 +73,32 @@ RTN's initialisation) are documented in `src/quantization/quantizers.py` and
 `src/quantization/metaquant.py`.
 **Backbones** (`--model`): `resnet18 resnet50 mobilenetv2 convnext_t vit_s16
 swin_t` (timm ImageNet-1k weights; `vit_s16` uses DeiT-S weights).
+
+## Results
+
+<p align="center">
+  <img src="docs/figures/efficiency_overhead.png" width="820"
+       alt="Per-backbone ImageNet top-1 accuracy (left) and hypernetwork memory overhead, 1.06 to 1.10x (right).">
+  <br><em>Fig. 2 of the paper: accuracy per backbone, and what the
+  hypernetwork costs in peak training memory.</em>
+</p>
+
+Accuracy holds across all six backbones and the hypernetwork costs
+1.06-1.10x in peak training memory. The gain grows with model size while the
+overhead does not, so larger backbones are the better target.
+
+<p align="center">
+  <img src="docs/figures/ablation_study.png" width="820"
+       alt="Component ablations on CIFAR-10 / ResNet-18 across optimization strategy, statistical components and quantization design.">
+  <br><em>Fig. 3 of the paper: component ablations on CIFAR-10 / ResNet-18.</em>
+</p>
+
+Ablations on CIFAR-10 / ResNet-18. The bilevel split and the soft quantizer
+matter most: training the hypernetwork in a single level costs 2.7 points, and
+replacing Q_soft with an STE costs 3.3.
+
+Both figures regenerate from run directories with
+`python scripts/plot_paper_figures.py --out plots`.
 
 ## Setup
 Python ≥ 3.10.
@@ -203,7 +226,5 @@ src/training/              training loops, methods
 src/utils/data.py          CIFAR / ImageNet loaders, held-out split
 scripts/                   job generation, SLURM, queue, aggregation, prefetch
 tests/smoke_test.py        CPU checks (make test)
-docs/                      figures
-```
-
+docs/figures/              the paper's figures
 ```
